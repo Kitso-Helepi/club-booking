@@ -7,10 +7,11 @@
  */
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { events, inventoryItems, layoutVersions, layouts, ticketTypes } from "@/db/schema";
+import { allocations, events, inventoryItems, layoutVersions, layouts, ticketTypes } from "@/db/schema";
 import { validateLayout } from "@/domain/layout-validation";
 import { layoutGeometry } from "@/domain/layout";
 import { audit } from "@/server/audit";
+import { activeAllocation } from "@/server/booking/availability";
 import { lockEvent } from "@/server/booking/holds";
 import { AppError } from "@/server/errors";
 import { requireEventCapability } from "@/server/permissions";
@@ -61,6 +62,41 @@ export async function publishLayoutVersion(
     }));
     const diff = diffInventory(keyed, geometry);
 
+    // Refuse anything that would disturb live sales, before writing anything.
+    const touchedIds = [...diff.retire.map((i) => i.id), ...diff.matched.map((m) => m.item.id)];
+    const sold = new Set(
+      touchedIds.length === 0
+        ? []
+        : (
+            await tx
+              .selectDistinct({ id: allocations.inventoryItemId })
+              .from(allocations)
+              .where(and(eq(allocations.eventId, eventId), inArray(allocations.inventoryItemId, touchedIds), activeAllocation))
+          ).map((r) => r.id),
+    );
+    const removedWithSales = diff.retire.filter((i) => sold.has(i.id)).map((i) => i.objectKey).sort();
+    if (removedWithSales.length > 0) {
+      throw new AppError("conflict", "These tables or seats have bookings and cannot be removed", {
+        keys: removedWithSales,
+        needs: "reassignment",
+      });
+    }
+    const typeById = new Map(types.map((t) => [t.id, t]));
+    const changedWithSales = diff.matched
+      .filter(({ item, desired }) => {
+        if (!sold.has(item.id)) return false;
+        const next = types.find((t) => t.key === desired.ticketTypeKey)!;
+        return item.kind !== desired.kind || typeById.get(item.ticketTypeId)?.admissionsPerUnit !== next.admissionsPerUnit;
+      })
+      .map(({ item }) => item.objectKey)
+      .sort();
+    if (changedWithSales.length > 0) {
+      throw new AppError("conflict", "These tables or seats have bookings, so their type or size cannot change", {
+        keys: changedWithSales,
+        reason: "change_with_sales",
+      });
+    }
+
     let created = 0;
     for (const d of diff.create) {
       await tx.insert(inventoryItems).values({
@@ -96,7 +132,11 @@ export async function publishLayoutVersion(
       updated++;
     }
 
-    const retired = 0;
+    let retired = 0;
+    for (const item of [...diff.retire].sort((a, b) => a.id.localeCompare(b.id))) {
+      await tx.update(inventoryItems).set({ status: "retired", updatedAt: new Date() }).where(eq(inventoryItems.id, item.id));
+      retired++;
+    }
 
     await tx
       .update(layoutVersions)

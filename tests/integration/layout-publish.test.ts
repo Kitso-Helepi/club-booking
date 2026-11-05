@@ -5,10 +5,11 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { db } from "@/db/client";
-import { auditEvents, events, inventoryItems, layoutVersions, layouts } from "@/db/schema";
+import { allocations, auditEvents, events, inventoryItems, layoutVersions, layouts } from "@/db/schema";
+import { createHold } from "@/server/booking/holds";
 import { isAppError } from "@/server/errors";
 import { publishLayoutVersion } from "@/server/layouts/publish";
-import { freshEvent } from "./helpers";
+import { bookAndPay, forceExpireHold, freshEvent } from "./helpers";
 import { createDraft, insertDraftGeometry, managerFor } from "./layout-helpers";
 
 async function rejection(p: Promise<unknown>) {
@@ -133,5 +134,140 @@ describe("publishLayoutVersion: happy path and guards", () => {
     expect((await rejection(publishLayoutVersion(db(), { actorUserId: door, versionId: draft }))).code).toBe("forbidden");
     expect((await rejection(publishLayoutVersion(db(), { actorUserId: stranger, versionId: draft }))).code).toBe("not_found");
     await expect(publishLayoutVersion(db(), { actorUserId: owner, versionId: draft })).resolves.toMatchObject({ versionId: draft });
+  });
+});
+
+const remove = (...keys: string[]) => (g: import("@/domain/layout").LayoutGeometry) => {
+  g.objects = g.objects.filter((o) => !keys.includes(o.key));
+};
+const sellTable = (ev: Awaited<ReturnType<typeof freshEvent>>, key = "t1") =>
+  bookAndPay(ev.event, [{ inventoryItemId: ev.item(key).id, quantity: 1 }]);
+
+describe("publishLayoutVersion: sales safety", () => {
+  it("refuses to remove a sold table and changes nothing", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await sellTable(ev);
+    const draft = await createDraft(ev, remove("t1"));
+
+    const err = await rejection(publishLayoutVersion(db(), { actorUserId: actor, versionId: draft }));
+
+    expect(err.code).toBe("conflict");
+    expect(err.details).toMatchObject({ keys: ["t1"], needs: "reassignment" });
+    expect((await itemByKey(ev.event, "t1")).status).toBe("active");
+    expect(await versionState(draft)).toBe("draft");
+    expect(await db().select().from(auditEvents).where(eq(auditEvents.entityId, draft))).toHaveLength(0);
+    const [event] = await db().select().from(events).where(eq(events.id, ev.event));
+    expect(event.publishedLayoutVersionId).toBe(ev.layoutVersion);
+  });
+
+  it("refuses to remove a table with a live hold", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await createHold({ eventId: ev.event, items: [{ inventoryItemId: ev.item("t1").id, quantity: 1 }] });
+    const draft = await createDraft(ev, remove("t1"));
+
+    const err = await rejection(publishLayoutVersion(db(), { actorUserId: actor, versionId: draft }));
+    expect(err.code).toBe("conflict");
+  });
+
+  it("lets an expired hold go: the table is retired", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const hold = await createHold({ eventId: ev.event, items: [{ inventoryItemId: ev.item("t1").id, quantity: 1 }] });
+    await forceExpireHold(hold.holdId);
+    const draft = await createDraft(ev, remove("t1"));
+
+    const result = await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+
+    expect(result.retired).toBe(1);
+    expect((await itemByKey(ev.event, "t1")).status).toBe("retired");
+  });
+
+  it("retires an unsold removed table but keeps the row", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const before = await itemByKey(ev.event, "t3");
+    const draft = await createDraft(ev, remove("t3"));
+
+    const result = await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+
+    expect(result).toMatchObject({ created: 0, updated: 0, retired: 1 });
+    const after = await itemByKey(ev.event, "t3");
+    expect(after.id).toBe(before.id);
+    expect(after.status).toBe("retired");
+  });
+
+  it("retires an unavailable item when its object is removed", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await db().update(inventoryItems).set({ status: "unavailable" }).where(eq(inventoryItems.id, ev.item("t4").id));
+    const draft = await createDraft(ev, remove("t4"));
+
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+    expect((await itemByKey(ev.event, "t4")).status).toBe("retired");
+  });
+
+  it("keeps existing allocations pointing at the same item", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await sellTable(ev);
+    const item = ev.item("t1");
+    const draft = await createDraft(ev, (g) => {
+      const t1 = g.objects.find((o) => o.key === "t1")!;
+      t1.label = "Renamed";
+      t1.x += 20;
+    });
+
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+
+    const allocs = await db().select().from(allocations).where(eq(allocations.inventoryItemId, item.id));
+    expect(allocs.filter((a) => a.state === "confirmed")).toHaveLength(1);
+    expect((await itemByKey(ev.event, "t1")).id).toBe(item.id);
+  });
+
+  it("refuses to resize a sold table, but allows it while unsold", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await sellTable(ev, "t1");
+    const resize = (key: string) => (g: import("@/domain/layout").LayoutGeometry) => {
+      const t = g.objects.find((o) => o.key === key)!;
+      t.booking = { mode: "exclusive_table", ticketTypeKey: "table-4", capacity: 4 };
+    };
+
+    const err = await rejection(publishLayoutVersion(db(), { actorUserId: actor, versionId: await createDraft(ev, resize("t1")) }));
+    expect(err.code).toBe("conflict");
+    expect(err.details).toMatchObject({ keys: ["t1"], reason: "change_with_sales" });
+
+    const before = await itemByKey(ev.event, "t2");
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: await createDraft(ev, resize("t2")) });
+    expect((await itemByKey(ev.event, "t2")).ticketTypeId).not.toBe(before.ticketTypeId);
+  });
+
+  it("reactivates a retired key with its original id", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const original = await itemByKey(ev.event, "t3");
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: await createDraft(ev, remove("t3")) });
+    expect((await itemByKey(ev.event, "t3")).status).toBe("retired");
+
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: await createDraft(ev) });
+
+    const back = await itemByKey(ev.event, "t3");
+    expect(back.status).toBe("active");
+    expect(back.id).toBe(original.id);
+  });
+
+  it("leaves staff-unavailable items unavailable", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    await db().update(inventoryItems).set({ status: "unavailable" }).where(eq(inventoryItems.id, ev.item("t2").id));
+    const draft = await createDraft(ev, (g) => (g.objects.find((o) => o.key === "t2")!.label = "Renamed"));
+
+    await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+
+    const t2 = await itemByKey(ev.event, "t2");
+    expect(t2.status).toBe("unavailable");
+    expect(t2.label).toBe("Renamed");
   });
 });
