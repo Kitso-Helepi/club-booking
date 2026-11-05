@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      # CI-only throwaway values. No real secrets are used in CI.
+      TEST_DATABASE_URL: postgres://club_app:app_local_only@localhost:5432/club_booking_test
+      TEST_MIGRATION_DATABASE_URL: postgres://club_migrator:migrator_local_only@localhost:5432/club_booking_test
+      DATABASE_URL: postgres://club_app:app_local_only@localhost:5432/club_booking_test
+      TOKEN_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else
+      PAYMENT_SIMULATOR_SECRET: ci-only-simulator-secret
+      PAYMENTS_MODE: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Create database roles (same script as local Docker)
+        run: PGPASSWORD=postgres_ci_only psql -h localhost -U postgres -f db/init/01-roles.sql
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Unit + Postgres integration tests
+        run: npm test
+      - run: npm run build

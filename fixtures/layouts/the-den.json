@@ -1,0 +1,26 @@
+{
+  "_comment": "SYNTHETIC FIXTURE. Fictional venue 'The Den' for the Velvet Fox pilot. Units are canvas pixels.",
+  "width": 800,
+  "height": 600,
+  "gridSize": 20,
+  "objects": [
+    { "key": "stage", "type": "stage", "label": "Stage", "x": 260, "y": 20, "width": 280, "height": 80 },
+    { "key": "bar", "type": "bar", "label": "Bar", "x": 20, "y": 200, "width": 60, "height": 240 },
+    { "key": "entrance", "type": "entrance", "label": "Entrance", "x": 360, "y": 560, "width": 80, "height": 30 },
+    { "key": "lounge", "type": "zone", "label": "VIP Lounge", "x": 120, "y": 140, "width": 360, "height": 260, "zoneMode": "tables" },
+    { "key": "t1", "type": "table", "label": "T1", "shape": "circle", "x": 160, "y": 180, "width": 80, "height": 80, "bookable": true, "zoneKey": "lounge", "booking": { "mode": "exclusive_table", "ticketTypeKey": "vip-table-6", "capacity": 6 } },
+    { "key": "t2", "type": "table", "label": "T2", "shape": "circle", "x": 300, "y": 180, "width": 80, "height": 80, "bookable": true, "zoneKey": "lounge", "booking": { "mode": "exclusive_table", "ticketTypeKey": "vip-table-6", "capacity": 6 } },
+    { "key": "t3", "type": "table", "label": "T3", "shape": "circle", "x": 160, "y": 300, "width": 64, "height": 64, "bookable": true, "zoneKey": "lounge", "booking": { "mode": "exclusive_table", "ticketTypeKey": "table-4", "capacity": 4 } },
+    { "key": "t4", "type": "table", "label": "T4", "shape": "circle", "x": 300, "y": 300, "width": 64, "height": 64, "bookable": true, "zoneKey": "lounge", "booking": { "mode": "exclusive_table", "ticketTypeKey": "table-4", "capacity": 4 } },
+    { "key": "balcony", "type": "zone", "label": "Balcony Seats", "x": 520, "y": 140, "width": 260, "height": 140, "zoneMode": "seats" },
+    { "key": "b1", "type": "chair", "label": "B1", "shape": "circle", "x": 540, "y": 170, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b2", "type": "chair", "label": "B2", "shape": "circle", "x": 600, "y": 170, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b3", "type": "chair", "label": "B3", "shape": "circle", "x": 660, "y": 170, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b4", "type": "chair", "label": "B4", "shape": "circle", "x": 720, "y": 170, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b5", "type": "chair", "label": "B5", "shape": "circle", "x": 540, "y": 230, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b6", "type": "chair", "label": "B6", "shape": "circle", "x": 600, "y": 230, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b7", "type": "chair", "label": "B7", "shape": "circle", "x": 660, "y": 230, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "b8", "type": "chair", "label": "B8", "shape": "circle", "x": 720, "y": 230, "width": 36, "height": 36, "bookable": true, "zoneKey": "balcony", "booking": { "mode": "seat", "ticketTypeKey": "balcony-seat", "capacity": 1 } },
+    { "key": "dance-floor", "type": "label", "label": "Dance floor", "x": 260, "y": 440, "width": 280, "height": 80 }
+  ]
+}
