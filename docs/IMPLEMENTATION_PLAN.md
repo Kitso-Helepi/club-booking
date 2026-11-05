@@ -24,8 +24,8 @@ Legend: ✅ done and tested · 🟡 partly done · ⬜ not started. Issue drafts
 ## Phase 3: Floor plan editor + publishing (workstream B) ⬜
 - ⬜ Konva editor: add/move/resize/rotate/duplicate/label, snapping, zoom/pan, undo
 - ⬜ Blank layout / copy saved layout; save draft, reopen, preview as guest
-- ⬜ Publish with validation (labels, capacities, prices, zone modes)
-- ⬜ Inventory sync on publish preserving allocations; audited reassignment workflow
+- 🟡 Publish with validation (labels, capacities, prices, zone modes): server engine done (`src/server/layouts/publish.ts`), no editor or route yet
+- 🟡 Inventory sync on publish preserving allocations: done; audited reassignment workflow still ⬜
 
 ## Phase 4: Seats + GA complete (workstream C/D) 🟡
 - ✅ Server: seats, GA pools, event cap, mixed baskets, tests

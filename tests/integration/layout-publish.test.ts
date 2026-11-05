@@ -9,7 +9,7 @@ import { allocations, auditEvents, events, inventoryItems, layoutVersions, layou
 import { createHold } from "@/server/booking/holds";
 import { isAppError } from "@/server/errors";
 import { publishLayoutVersion } from "@/server/layouts/publish";
-import { bookAndPay, forceExpireHold, freshEvent } from "./helpers";
+import { bookAndPay, forceExpireHold, freshEvent, settle } from "./helpers";
 import { createDraft, insertDraftGeometry, managerFor } from "./layout-helpers";
 
 async function rejection(p: Promise<unknown>) {
@@ -269,5 +269,47 @@ describe("publishLayoutVersion: sales safety", () => {
     const t2 = await itemByKey(ev.event, "t2");
     expect(t2.status).toBe("unavailable");
     expect(t2.label).toBe("Renamed");
+  });
+});
+
+describe("publishLayoutVersion: concurrency", () => {
+  it("two simultaneous publishes of one draft: one wins, one gets a conflict", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const draft = await createDraft(ev, (g) => (g.objects.find((o) => o.key === "t1")!.label = "Once"));
+
+    const { ok, errors } = await settle([1, 2].map(() => publishLayoutVersion(db(), { actorUserId: actor, versionId: draft })));
+
+    expect(ok).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+    expect(isAppError(errors[0]) && errors[0].code).toBe("conflict");
+  });
+
+  it("a publish racing a hold on the same table never both succeeds", async () => {
+    for (let i = 0; i < 5; i++) {
+      const ev = await freshEvent();
+      const actor = await managerFor(ev);
+      const t1 = ev.item("t1");
+      const draft = await createDraft(ev, remove("t1"));
+
+      const { ok, errors } = await settle<unknown>([
+        publishLayoutVersion(db(), { actorUserId: actor, versionId: draft }),
+        createHold({ eventId: ev.event, items: [{ inventoryItemId: t1.id, quantity: 1 }] }),
+      ]);
+
+      // Exactly one side wins, and the loser is a business error (no deadlock or 500).
+      expect(ok).toHaveLength(1);
+      expect(errors).toHaveLength(1);
+      expect(isAppError(errors[0])).toBe(true);
+      const held = await db().select().from(allocations).where(eq(allocations.inventoryItemId, t1.id));
+      const status = (await itemByKey(ev.event, "t1")).status;
+      if (held.length > 0) {
+        expect(status).toBe("active");
+        expect(await versionState(draft)).toBe("draft");
+      } else {
+        expect(status).toBe("retired");
+        expect(await versionState(draft)).toBe("published");
+      }
+    }
   });
 });
