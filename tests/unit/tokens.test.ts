@@ -18,11 +18,25 @@ describe("tokens", () => {
     expect(hashToken(t)).toHaveLength(64);
   });
 
+  // Tamper with decoded BYTES, not base64 characters: the last base64url
+  // character carries padding bits, so editing characters can leave the bytes
+  // unchanged (that made an earlier version of this test flaky, ~1 in 150 runs).
+  const flipFirstByte = (b64url: string) => {
+    const bytes = Buffer.from(b64url, "base64url");
+    bytes[0] ^= 0x01;
+    return bytes.toString("base64url");
+  };
+
   it("detects tampered ciphertext", () => {
-    const enc = encryptToken(newToken());
-    const parts = enc.split(".");
-    parts[3] = parts[3].slice(0, -2) + (parts[3].endsWith("A") ? "BB" : "AA");
-    expect(() => decryptToken(parts.join("."))).toThrow();
+    for (let i = 0; i < 50; i++) {
+      const [v, iv, tag, ct] = encryptToken(newToken()).split(".");
+      expect(() => decryptToken([v, iv, tag, flipFirstByte(ct)].join("."))).toThrow();
+    }
+  });
+
+  it("detects a tampered authentication tag", () => {
+    const [v, iv, tag, ct] = encryptToken(newToken()).split(".");
+    expect(() => decryptToken([v, iv, flipFirstByte(tag), ct].join("."))).toThrow();
   });
 
   it("booking references avoid ambiguous characters", () => {
