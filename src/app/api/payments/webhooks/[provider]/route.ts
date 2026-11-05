@@ -6,6 +6,7 @@
 import { getPaymentProvider } from "@/server/payments/provider";
 import { processProviderEvent } from "@/server/payments/process-event";
 import { handle } from "@/server/http";
+import { sendNotificationsAfterResponse } from "@/server/notifications/send-after-response";
 
 export async function POST(req: Request, ctx: RouteContext<"/api/payments/webhooks/[provider]">) {
   const { provider: name } = await ctx.params;
@@ -14,6 +15,10 @@ export async function POST(req: Request, ctx: RouteContext<"/api/payments/webhoo
     const provider = getPaymentProvider(name);
     const event = await provider.parseWebhook(raw, req.headers);
     const result = await processProviderEvent(provider.name, event);
+    // The confirmation transaction has committed by now; email the guest.
+    if ((result.outcome === "confirmed" || result.outcome === "confirmed_late") && result.orderId) {
+      sendNotificationsAfterResponse(result.orderId);
+    }
     return { received: true, outcome: result.outcome };
   });
 }

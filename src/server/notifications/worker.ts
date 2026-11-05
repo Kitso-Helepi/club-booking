@@ -64,14 +64,23 @@ async function buildConfirmationEmail(orderId: string): Promise<OutgoingEmail> {
   return { to: row.order.buyerEmail, subject: `Booking confirmed: ${row.event.title} (${row.order.bookingReference})`, text, html };
 }
 
-/** Process up to `limit` due jobs. Returns a summary (no personal data). */
-export async function runNotificationBatch(sender: EmailSender, limit = 20) {
+/**
+ * Process up to `limit` due jobs (optionally only one order's). Returns a summary (no personal data).
+ */
+export async function runNotificationBatch(sender: EmailSender, limit = 20, opts: { orderId?: string } = {}) {
   // 1) Claim due jobs.
   const claimed = await db().transaction(async (tx) => {
     const due = await tx
       .select({ id: notificationJobs.id })
       .from(notificationJobs)
-      .where(and(inArray(notificationJobs.state, ["pending", "failed"]), lte(notificationJobs.nextAttemptAt, sql`now()`), sql`${notificationJobs.attempts} < ${notificationJobs.maxAttempts}`))
+      .where(
+        and(
+          inArray(notificationJobs.state, ["pending", "failed"]),
+          lte(notificationJobs.nextAttemptAt, sql`now()`),
+          sql`${notificationJobs.attempts} < ${notificationJobs.maxAttempts}`,
+          opts.orderId ? eq(notificationJobs.orderId, opts.orderId) : undefined,
+        ),
+      )
       .orderBy(asc(notificationJobs.nextAttemptAt))
       .limit(limit)
       .for("update", { skipLocked: true });
@@ -118,4 +127,18 @@ export async function runNotificationBatch(sender: EmailSender, limit = 20) {
     }
   }
   return summary;
+}
+
+/**
+ * Try to send one order's notifications straight away (called after a booking
+ * is confirmed). Safe to fire and forget: it NEVER throws. Anything that fails
+ * stays in the queue and the worker retries it with backoff.
+ */
+export async function sendNotificationsForOrder(orderId: string, sender: EmailSender): Promise<void> {
+  try {
+    await runNotificationBatch(sender, 10, { orderId });
+  } catch (e) {
+    // No order details or addresses in logs.
+    console.error("Immediate notification send failed; the worker will retry:", e instanceof Error ? e.message : "unknown");
+  }
 }

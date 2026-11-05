@@ -75,7 +75,7 @@ npm run dev
 - Staff: http://localhost:3000/staff/login. Accounts are `owner@velvetfox.test`, `manager@velvetfox.test`, `door1@velvetfox.test` and `door2@velvetfox.test`. The password is `SEED_STAFF_PASSWORD` from your `.env`.
 - Captured emails (Mailpit): http://localhost:8025
 
-Send pending confirmation emails (run once, or keep it watching):
+Confirmation emails are sent automatically right after a booking is confirmed (open Mailpit to see them). If sending fails, for example because Mailpit or SMTP is down, the email stays queued and the booking is unaffected. Run the worker to retry anything queued (once, or keep it watching):
 
 ```bash
 npm run worker:notifications -- --watch
