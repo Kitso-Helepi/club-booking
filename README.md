@@ -21,7 +21,7 @@ Mobile-first booking for club nights: guests pick general admission, a reserved 
 | Door screen: **camera QR scanning** | ⚠️ Built, **not verified**. Needs a real phone over HTTPS (see `docs/PHONE_TESTING.md`) |
 | Email confirmations via Nodemailer → Mailpit, retry/backoff | ✅ Working (one real email captured in Mailpit) |
 | Seats and GA in holds/passes | ✅ Server logic + tests. Guest UI supports them |
-| Floor plan **editor** (Konva) + publish workflow | ❌ Not started (workstream B) |
+| Floor plan **editor** (Konva) + publish workflow | 🟡 Publish engine (server) done and tested; editor UI and API routes not started (workstream B) |
 | Cancellations/refunds, staff resend, message history | ❌ Schema only (workstreams D/E) |
 | Owner screens (staff, venues, audit viewer) | ❌ Not started |
 | Playwright journey | ⚠️ Written (`tests/e2e`), **not run yet** (browsers not installed) |
@@ -141,7 +141,7 @@ More: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · API examples: [docs/API.md
 
 ## Known limitations
 
-- Floor plan editor, publishing, audited reassignment: **not built**.
+- Floor plan editor UI and publish API route, audited reassignment: **not built** (the publish engine `publishLayoutVersion` exists, server only).
 - Cancellation/refund flow: tables exist, no service or UI yet.
 - Staff resend + message history screens: not built (worker + `delivery_attempts` exist).
 - Camera scanning, two-device scanning, low light and connection loss: **not tested on real phones**.
