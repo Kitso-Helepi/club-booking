@@ -21,7 +21,8 @@ export type PublishResult = { versionId: string; created: number; updated: numbe
 
 export async function publishLayoutVersion(
   database: Db,
-  input: { actorUserId: string; versionId: string },
+  /** Pass `eventId` from routes: a draft of any other event is then refused. */
+  input: { actorUserId: string; versionId: string; eventId?: string },
 ): Promise<PublishResult> {
   // Find the owning event without locking; everything is re-checked under the lock.
   const [owner] = await database
@@ -35,6 +36,7 @@ export async function publishLayoutVersion(
 
   return database.transaction(async (tx) => {
     const { event } = await requireEventCapability(tx, input.actorUserId, eventId, "event.manage");
+    if (input.eventId && input.eventId !== eventId) throw new AppError("conflict", "That layout belongs to a different event");
     await lockEvent(tx, eventId);
 
     const [version] = await tx.select().from(layoutVersions).where(eq(layoutVersions.id, input.versionId));
@@ -117,7 +119,11 @@ export async function publishLayoutVersion(
       const ticketTypeId = typeId.get(desired.ticketTypeKey)!;
       const reactivate = item.status === "retired";
       const changed =
-        item.label !== desired.label || item.zoneKey !== desired.zoneKey || item.ticketTypeId !== ticketTypeId || reactivate;
+        item.label !== desired.label ||
+        item.zoneKey !== desired.zoneKey ||
+        item.ticketTypeId !== ticketTypeId ||
+        item.kind !== desired.kind ||
+        reactivate;
       if (!changed) continue;
       await tx
         .update(inventoryItems)
@@ -125,6 +131,7 @@ export async function publishLayoutVersion(
           label: desired.label,
           zoneKey: desired.zoneKey,
           ticketTypeId,
+          kind: desired.kind,
           ...(reactivate ? { status: "active" as const } : {}),
           updatedAt: new Date(),
         })

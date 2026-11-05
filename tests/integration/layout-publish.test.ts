@@ -11,6 +11,7 @@ import { isAppError } from "@/server/errors";
 import { publishLayoutVersion } from "@/server/layouts/publish";
 import { bookAndPay, forceExpireHold, freshEvent, settle } from "./helpers";
 import { createDraft, insertDraftGeometry, managerFor } from "./layout-helpers";
+import { ensureClubWithEvent } from "@/server/fixtures";
 
 async function rejection(p: Promise<unknown>) {
   try {
@@ -311,5 +312,34 @@ describe("publishLayoutVersion: concurrency", () => {
         expect(await versionState(draft)).toBe("published");
       }
     }
+  });
+});
+
+describe("publishLayoutVersion: review fixes", () => {
+  it("updates kind when an unsold seat becomes a table", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const draft = await createDraft(ev, (g) => {
+      const b1 = g.objects.find((o) => o.key === "b1")!;
+      delete b1.zoneKey;
+      b1.booking = { mode: "exclusive_table", ticketTypeKey: "table-4", capacity: 4 };
+    });
+
+    const result = await publishLayoutVersion(db(), { actorUserId: actor, versionId: draft });
+
+    expect(result.updated).toBe(1);
+    expect((await itemByKey(ev.event, "b1")).kind).toBe("table");
+  });
+
+  it("refuses a draft that belongs to a different event of the same club when eventId is given", async () => {
+    const ev = await freshEvent();
+    const actor = await managerFor(ev);
+    const other = await ensureClubWithEvent(db(), { ids: { club: ev.club, venue: ev.venue }, eventSlug: `other-${randomUUID().slice(0, 8)}` });
+    const otherDraft = await createDraft({ ...ev, ...other } as unknown as Parameters<typeof createDraft>[0]);
+
+    const err = await rejection(publishLayoutVersion(db(), { actorUserId: actor, eventId: ev.event, versionId: otherDraft }));
+
+    expect(err.code).toBe("conflict");
+    expect(await versionState(otherDraft)).toBe("draft");
   });
 });
